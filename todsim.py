@@ -1,4 +1,7 @@
 import numpy as np
+import h5py
+
+import tools
 
 class TodSim():
     def __init__(
@@ -11,7 +14,8 @@ class TodSim():
             temp_components=None,
             pointing=None,
             sample_rate=50,  # Hz
-            delta_nu=2.0/1024  # GHz
+            delta_nu=2.0/1024,  # GHz
+            freqs_linear=False,
         ):
         if gain is not None:
             self.gain = gain
@@ -25,6 +29,7 @@ class TodSim():
         self.n_feed = n_feed
         self.radiometer_noise = 1.0 / np.sqrt(delta_nu / sample_rate * 1e9)
         self.pointing = pointing
+        self.freqs_linear = freqs_linear
 
     def generate_tod(self, t_comps=None):
         if t_comps is None:
@@ -91,6 +96,53 @@ class ConstantGain(Gain):
             self.sim.n_freq, self.sim.n_tod
             ))
 
+
+
+class HandmadeGain(Gain):
+    def __init__(self, sim):
+        super().__init__(sim)
+        self.name = 'handmade_gain'
+
+    def _generate_random_gain_db(n_freq):
+        nums = np.random.randn(10)
+
+        nu = np.linspace(0, 4, 2 * n_freq)
+        gain_nu_db = 40 - 4 * (nu - 2.0) ** 2 \
+            + (nums[0] + nums[1] * (nu - 2.0) + nums[2] * (nu - 2.0) ** 2) \
+            * np.sin(2 * np.pi * nu / 0.6 + 3 * nums[3]) ** 5 \
+            + nums[4] * np.sin(2 * np.pi * nu / 2e-1) ** 3
+        sb_offset = np.zeros(2 * n_freq) + 0.5
+        sb_offset[:n_freq] = -0.5
+        gain_nu_db = gain_nu_db + nums[8] * sb_offset
+        gain_nu_db = gain_nu_db * min(max(1 + 0.15 * nums[9], 0.5), 1.5)
+        return gain_nu_db
+    
+    def generate_gain(self):
+        assert(self.sim.n_sb == 4, 'Gain model assumes four sidebands')
+        self.gain_nu = np.zeros((self.sim.n_feed, self.sim.n_sb, self.sim.n_freq))
+        self.gain_t = np.zeros((self.sim.n_feed, self.sim.n_tod))
+        if self.sim.gain_PSD_params is None:
+            filename = 'Cf_prior_data.hdf5'
+            with h5py.File(filename, mode="r") as my_file:
+                alpha_prior = np.array(my_file['alpha_prior'][()])
+                fknee_prior = np.array(my_file['fknee_prior'][()])
+                sigma0_prior = np.array(my_file['sigma0_prior'][()])
+            self.sim.gain_psd_params = np.array([sigma0_prior, fknee_prior, alpha_prior]).transpose((1, 0))
+
+        for feed in range(self.sim.n_feed):
+            self.gain_t[feed] = tools.generate_1f_noise(self.sim.n_tod, self.sim.gain_psd_params[feed])
+            for band in range(2):
+                gain_nu_db = self._generate_random_gain_db(self.sim.n_freq)
+                gain_nu_band = 10^(gain_nu_db / 10)
+                if not self.sim.freqs_linear:
+                    gain_nu_band[:self.sim.n_freq] = gain_nu_band[:self.sim.n_freq][::-1]
+                self.gain_nu[feed, 2*band] = gain_nu_band[:self.sim.n_freq]
+                self.gain_nu[feed, 2*band+1] = gain_nu_band[self.sim.n_freq:]
+        return self.gain_nu[:, :, :, None] * self.gain_t[:, None, None, :]
+        
+        
+
+
 class ConstantRadiometer(TempComponent):
     def __init__(self, sim, temp_receiver=20.0):
         super().__init__(sim)
@@ -117,3 +169,5 @@ class SinusWNStandingWave(TempComponent):
         freqs = 0.5 * (freqs[1:] + freqs[:-1])
         freq_ampls = np.sin(2 * np.pi / self.period * freqs[None, None, :] + offsets[:, :, None])
         return freq_ampls[:, :, :, None] * tod[None, None, None, :]
+
+
