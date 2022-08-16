@@ -39,6 +39,7 @@ class TodSim():
         temp_tod = np.zeros((self.n_feed, self.n_sb, self.n_freq, self.n_tod))
         for comp in comps.values():
             temp_tod += comp.generate_tod()
+        print(temp_tod[0, 0, :, 0])
         self.tod = self.gain.generate_gain() * temp_tod \
             * (1.0 + self.radiometer_noise * np.random.randn(
                 self.n_feed, self.n_sb, self.n_freq, self.n_tod
@@ -60,8 +61,10 @@ class TodSim():
         if isinstance(gain, str):
             if gain == 'constant_gain':
                 self.gain = ConstantGain(self)
+            elif gain == 'handmade_gain':
+                self.gain = HandmadeGain(self)
             else:
-                print('Unknown gain name', gain)
+                print('Unknown gain name:', gain)
 
 class Gain():
     def __init__(
@@ -99,10 +102,12 @@ class ConstantGain(Gain):
 
 
 class HandmadeGain(Gain):
-    def __init__(self, sim):
+    def __init__(self, sim, gain_PSD_params=None):
         super().__init__(sim)
         self.name = 'handmade_gain'
+        self.gain_PSD_params = gain_PSD_params
 
+    @staticmethod
     def _generate_random_gain_db(n_freq):
         nums = np.random.randn(10)
 
@@ -121,7 +126,7 @@ class HandmadeGain(Gain):
         assert(self.sim.n_sb == 4, 'Gain model assumes four sidebands')
         self.gain_nu = np.zeros((self.sim.n_feed, self.sim.n_sb, self.sim.n_freq))
         self.gain_t = np.zeros((self.sim.n_feed, self.sim.n_tod))
-        if self.sim.gain_PSD_params is None:
+        if self.gain_PSD_params is None:
             filename = 'Cf_prior_data.hdf5'
             with h5py.File(filename, mode="r") as my_file:
                 alpha_prior = np.array(my_file['alpha_prior'][()])
@@ -133,14 +138,12 @@ class HandmadeGain(Gain):
             self.gain_t[feed] = tools.generate_1f_noise(self.sim.n_tod, self.sim.gain_psd_params[feed])
             for band in range(2):
                 gain_nu_db = self._generate_random_gain_db(self.sim.n_freq)
-                gain_nu_band = 10^(gain_nu_db / 10)
+                gain_nu_band = 10.0 ** (gain_nu_db / 10.0)
                 if not self.sim.freqs_linear:
                     gain_nu_band[:self.sim.n_freq] = gain_nu_band[:self.sim.n_freq][::-1]
                 self.gain_nu[feed, 2*band] = gain_nu_band[:self.sim.n_freq]
                 self.gain_nu[feed, 2*band+1] = gain_nu_band[self.sim.n_freq:]
-        return self.gain_nu[:, :, :, None] * self.gain_t[:, None, None, :]
-        
-        
+        return self.gain_nu[:, :, :, None] * (1.0 + self.gain_t[:, None, None, :])
 
 
 class ConstantRadiometer(TempComponent):

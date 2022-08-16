@@ -6,11 +6,32 @@ import todsim
 import tools
 
 
-n_samples = 100000
-tod = tools.generate_1f_noise(n_samples, [1.0, 1e-1, -3])
-print(tod.std())
-plt.plot(tod)
+n_tod = 1000
+
+my_sim = todsim.TodSim(n_tod=n_tod)
+my_sim.add_gain('handmade_gain')
+my_sim.add_component('constant_radiometer')
+my_sim.add_component('sinus_wn_standing_wave')
+
+full_tod = my_sim.generate_tod()
+
+print(full_tod.shape)
+print(full_tod[0, 0, :, 0])
+plt.imshow(full_tod[0, 0])
+
+plt.figure()
+plt.plot(my_sim.gain.gain_nu[0, 0])
+plt.figure()
+plt.plot(my_sim.gain.generate_gain()[0, 0, :, 100])
+plt.figure()
+plt.plot(my_sim.temp_components['constant_radiometer'].generate_tod()[0, 0, :, 16])
 plt.show()
+
+# n_samples = 100000
+# tod = tools.generate_1f_noise(n_samples, [1.0, 1e-1, -3])
+# print(tod.std())
+# plt.plot(tod)
+# plt.show()
 
 # filename = 'comap-0030102-2022-07-31-181145_s1.hd5'
 
