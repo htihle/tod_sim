@@ -16,6 +16,7 @@ class TodSim():
             sample_rate=50,  # Hz
             delta_nu=2.0/1024,  # GHz
             freqs_linear=False,
+            t_hot=300.0, 
         ):
         if gain is not None:
             self.gain = gain
@@ -30,6 +31,8 @@ class TodSim():
         self.radiometer_noise = 1.0 / np.sqrt(delta_nu / sample_rate * 1e9)
         self.pointing = pointing
         self.freqs_linear = freqs_linear
+        self.t_cmb = 2.7255  # K
+        self.t_hot = t_hot
 
     def generate_tod(self, t_comps=None):
         if t_comps is None:
@@ -39,12 +42,22 @@ class TodSim():
         temp_tod = np.zeros((self.n_feed, self.n_sb, self.n_freq, self.n_tod))
         for comp in comps.values():
             temp_tod += comp.generate_tod()
-        print(temp_tod[0, 0, :, 0])
+
+        # add Tsys spikes here at some point
+
         self.tod = self.gain.generate_gain() * temp_tod \
             * (1.0 + self.radiometer_noise * np.random.randn(
                 self.n_feed, self.n_sb, self.n_freq, self.n_tod
             ))
+        self.p_cold = np.mean(self.tod, -1)
+        self.t_sys = np.mean(temp_tod, -1)
+        self.gain_nu = self.gain.gain_nu
         return self.tod
+
+    def get_calibration_info(self):
+        self.p_hot = self.p_cold + self.gain_nu * (self.t_hot - self.t_cmb)
+        return self.t_sys, self.t_hot, self.t_cmb, self.p_hot, self.p_cold
+
 
     def add_component(self, comp):
         if isinstance(comp, str):
@@ -172,5 +185,4 @@ class SinusWNStandingWave(TempComponent):
         freqs = 0.5 * (freqs[1:] + freqs[:-1])
         freq_ampls = np.sin(2 * np.pi / self.period * freqs[None, None, :] + offsets[:, :, None])
         return freq_ampls[:, :, :, None] * tod[None, None, None, :]
-
 
