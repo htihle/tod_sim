@@ -63,8 +63,8 @@ class TodSim():
         if isinstance(comp, str):
             if comp == 'constant_radiometer':
                 self.temp_components[comp] = ConstantRadiometer(self)
-            elif comp == 'sinus_wn_standing_wave':
-                self.temp_components[comp] = SinusWNStandingWave(self)
+            elif comp == 'sinus_1f_standing_wave':
+                self.temp_components[comp] = Sinus1fStandingWave(self)
             else:
                 print('Unknown component name', comp)
         else:
@@ -171,15 +171,21 @@ class ConstantRadiometer(TempComponent):
             self.sim.n_freq, self.sim.n_tod
             ))
 
-class SinusWNStandingWave(TempComponent):
-    def __init__(self, sim, period=0.4, amplitude=0.1):
+class Sinus1fStandingWave(TempComponent):
+    def __init__(self, sim, period=0.4, amplitude=0.1, fknee=0.1, alpha=-2.0):
         super().__init__(sim)
-        self.name = 'sinus_wn_standing_wave'
+        self.name = 'sinus_1f_standing_wave'
         self.period = period
         self.amplitude = amplitude
+        self.fknee = fknee
+        self.alpha = alpha
 
     def generate_tod(self):
-        tod = np.random.randn(self.sim.n_tod) * self.amplitude
+        tod = tools.generate_1f_noise(
+            self.sim.n_samp,
+            [1.0, self.fknee, self.alpha],
+            sampleRate=self.sim.sample_rate
+        ) * self.amplitude
         offsets = np.random.randn(self.sim.n_feed, self.sim.n_sb) * 2 * np.pi
         freqs = np.linspace(0, 2, self.sim.n_freq + 1)
         freqs = 0.5 * (freqs[1:] + freqs[:-1])
